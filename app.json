@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "TheSignCo Field",
+    "slug": "thesignco-field",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wingtheidea.thesignco.field"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#D9480F",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.wingtheidea.thesignco.field",
+      "versionCode": 1,
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "thesignco-field",
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "TheSignCo Field uses the camera for site and installation photos.",
+          "microphonePermission": "TheSignCo Field records sound with walk-around videos.",
+          "photosPermission": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "TheSignCo Field confirms you are at the right outlet."
+        }
+      ]
+    ]
+  }
+}

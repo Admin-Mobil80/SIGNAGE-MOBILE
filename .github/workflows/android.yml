@@ -1,0 +1,69 @@
+name: Android
+
+# Pull requests: typecheck. Push to main: typecheck, build the release APK,
+# and publish it as a GitHub Release - the only way a build reaches phones.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - uses: actions/setup-java@v4
+        if: github.event_name != 'pull_request'
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # The android/ project is generated from app.json on every build
+      # (Expo continuous native generation), never committed.
+      - name: Generate the Android project
+        if: github.event_name != 'pull_request'
+        run: npx expo prebuild --platform android --no-install
+
+      # Signed with the debug key Expo's template ships, which is the same on
+      # every build, so new versions install over old ones. Before the Play
+      # Store, add a release keystore as repository secrets and sign with it.
+      - name: Build release APK
+        if: github.event_name != 'pull_request'
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Publish release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./app.json').expo.version")
+          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+          apk="TheSignCo-Field-${version}-build.${GITHUB_RUN_NUMBER}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+          gh release create "$tag" "$apk" \
+            --title "TheSignCo Field ${version} (build ${GITHUB_RUN_NUMBER})" \
+            --notes "Built from ${GITHUB_SHA::7} on main. Install on Android: download the APK and allow installs from this source when asked." \
+            --latest
