@@ -58,11 +58,29 @@ export default function Recce({ job, onBack, onDone }: { job: Job; onBack(): voi
 
   function next() {
     if (step < STEPS.length - 1) return setStep(step + 1);
+    const notes = [remarks.trim(), power && "Power point within 2 m", oldBoard && "Existing board to be removed", ladder && "Needs ladder/scaffolding", fromGround && `${fromGround} mm from ground`]
+      .filter(Boolean)
+      .join(" · ");
     submit({
       jobId: job.id,
+      outletId: job.outletId,
+      outletName: job.outletName,
       summary: `${w} × ${h} mm × ${qty} · ${mounting}`,
-      photos: Object.keys(shots).length,
-      videos: video ? 1 : 0,
+      action: {
+        type: "submitRecce",
+        outletId: job.outletId,
+        widthMm: w,
+        heightMm: h,
+        qty: Number(qty) || 1,
+        mounting,
+        remarks: notes || undefined,
+        gps: fix ? { lat: fix.lat, lng: fix.lng } : undefined,
+        agreedBy: ownerName.trim(),
+      },
+      files: [
+        ...Object.values(shots).map((uri) => ({ field: "photoKeys" as const, kind: "recce" as const, uri, contentType: "image/jpeg" })),
+        ...(video ? [{ field: "videoKey" as const, kind: "video" as const, uri: video.uri, contentType: "video/mp4" }] : []),
+      ],
     });
     onDone();
   }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
+import { request } from "../api";
 import { takePhoto } from "../capture";
 import { INSTALL_CHECKS, type Job } from "../data";
 import { useApp } from "../state";
@@ -20,13 +21,36 @@ export default function Install({ job, onBack, onDone }: { job: Job; onBack(): v
   const [after, setAfter] = useState<Record<string, string>>({});
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [workDone, setWorkDone] = useState("");
-  const [codeSent, setCodeSent] = useState(false);
+  const [codeSent, setCodeSent] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [signer, setSigner] = useState(job.contactName);
 
   const checkList = repair ? ["Problem fixed and tested", "Sign is secure", "Site cleaned"] : INSTALL_CHECKS;
   const allChecked = checkList.every((c) => checks[c]);
-  const canNext = [Object.keys(before).length >= 1, allChecked && (!repair || workDone.trim().length > 3), Object.keys(after).length >= 2, codeSent && code.length === 6 && signer.trim().length > 1][step];
+  // Sign-off is optional: if the owner is away, the visit goes in unsigned and
+  // the outlet signs off from the portal later.
+  const signing = Boolean(codeSent) && code.length > 0;
+  const canNext = [
+    Object.keys(before).length >= 1,
+    allChecked && (!repair || workDone.trim().length > 3),
+    Object.keys(after).length >= (repair ? 1 : 2),
+    repair || !signing || (code.length === 6 && signer.trim().length > 1),
+  ][step];
+
+  async function sendCode() {
+    setSending(true);
+    setCodeError(null);
+    try {
+      const result = await request<{ sentTo: string }>("/field/signoff-code", { body: { outletId: job.outletId } });
+      setCodeSent(result.sentTo);
+    } catch (error) {
+      setCodeError(error instanceof Error ? error.message : "Could not send the code.");
+    } finally {
+      setSending(false);
+    }
+  }
 
   const shoot = async (set: typeof setBefore, id: string) => {
     const uri = await takePhoto();
@@ -35,12 +59,27 @@ export default function Install({ job, onBack, onDone }: { job: Job; onBack(): v
 
   function next() {
     if (step < STEPS.length - 1) return setStep(step + 1);
-    submit({
-      jobId: job.id,
-      summary: repair ? `Repaired: ${workDone.trim()}` : `Installed ${job.sign?.code ?? ""}, signed off by ${signer.trim()}`,
-      photos: Object.keys(before).length + Object.keys(after).length,
-      videos: 0,
-    });
+    const photos = (set: Record<string, string>, field: "beforePhotoKeys" | "afterPhotoKeys" | "photoKeys", kind: "before" | "after" | "ticket") =>
+      Object.values(set).map((uri) => ({ field, kind, uri, contentType: "image/jpeg" }));
+    submit(
+      repair
+        ? {
+            jobId: job.id,
+            outletId: job.outletId,
+            outletName: job.outletName,
+            summary: `Repaired: ${workDone.trim()}`,
+            action: { type: "resolveTicket", ticketId: job.ticketId, resolution: workDone.trim() },
+            files: [...photos(before, "photoKeys", "ticket"), ...photos(after, "photoKeys", "ticket")],
+          }
+        : {
+            jobId: job.id,
+            outletId: job.outletId,
+            outletName: job.outletName,
+            summary: signing ? `Installed ${job.sign?.code ?? ""}, signed off by ${signer.trim()}` : `Installed ${job.sign?.code ?? ""}, outlet to sign off`,
+            action: { type: "submitInstall", outletId: job.outletId, ...(signing ? { signoffCode: code, signer: signer.trim() } : {}) },
+            files: [...photos(before, "beforePhotoKeys", "before"), ...photos(after, "afterPhotoKeys", "after")],
+          },
+    );
     onDone();
   }
 
@@ -107,7 +146,7 @@ export default function Install({ job, onBack, onDone }: { job: Job; onBack(): v
 
         {step === 2 && (
           <>
-            <Text style={{ color: C.muted }}>Two photos at least — these are what {job.client} sees.</Text>
+            <Text style={{ color: C.muted }}>{repair ? "At least one photo of the fixed sign." : `Two photos at least — these are what ${job.client} sees.`}</Text>
             <PhotoSlot label="After — straight on" hint="Whole sign in frame, level" uri={after.front} onCapture={() => void shoot(setAfter, "front")} />
             <PhotoSlot label="After — from the road" hint="Sign with the shop and street" uri={after.wide} onCapture={() => void shoot(setAfter, "wide")} />
             <PhotoSlot label="After — lit (evening)" optional uri={after.lit} onCapture={() => void shoot(setAfter, "lit")} />
@@ -119,20 +158,23 @@ export default function Install({ job, onBack, onDone }: { job: Job; onBack(): v
             <Card style={{ gap: 6 }}>
               <Text style={{ fontWeight: "700", fontSize: 16, color: C.fg }}>Outlet sign-off</Text>
               <Text style={{ color: C.muted }}>
-                Show {job.contactName.split(" ")[0]} the work. We text a six-digit code to {job.contactPhone}; they read it to you.
+                {repair
+                  ? `Show ${job.contactName.split(" ")[0]} the repair before you leave.`
+                  : `Show ${job.contactName.split(" ")[0]} the work. We email them a six-digit code; they read it to you.`}
               </Text>
-              {!codeSent ? (
-                <Button title="Send code to outlet" onPress={() => setCodeSent(true)} />
+              {repair ? null : !codeSent ? (
+                <Button title={sending ? "Sending…" : "Send code to outlet"} onPress={() => void sendCode()} disabled={sending} />
               ) : (
-                <Text style={{ color: C.ok, fontWeight: "600" }}>Code sent to {job.contactPhone}</Text>
+                <Text style={{ color: C.ok, fontWeight: "600" }}>Code sent to {codeSent}</Text>
               )}
+              {codeError && <Text style={{ color: C.bad }}>{codeError}</Text>}
             </Card>
             {codeSent && (
               <>
                 <Field label="Signed off by" value={signer} onChangeText={setSigner} />
                 <Text style={{ fontSize: 13, fontWeight: "700", color: C.muted }}>Code from the outlet</Text>
                 <CodeBoxes value={code} onChange={setCode} />
-                <Text style={{ color: C.faint, fontSize: 13 }}>Prototype: any six digits. If the owner is away, leave this visit open — the office will arrange sign-off.</Text>
+                <Text style={{ color: C.faint, fontSize: 13 }}>Leave the code empty if the owner is away — the outlet can sign off later from the portal.</Text>
               </>
             )}
           </>

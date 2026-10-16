@@ -16,7 +16,7 @@ type Route = { name: "jobs" } | { name: "job"; job: Job } | { name: "work"; job:
 
 /** A small stack: few enough screens that a navigation library is not worth its weight. */
 function Navigator() {
-  const { user } = useApp();
+  const { user, ready } = useApp();
   const [stack, setStack] = useState<Route[]>([{ name: "jobs" }]);
   const route = stack[stack.length - 1];
   const push = (r: Route) => setStack((s) => [...s, r]);
@@ -39,6 +39,13 @@ function Navigator() {
     if (!user) setStack([{ name: "jobs" }]);
   }, [user]);
 
+  if (!ready) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <Text style={{ color: C.muted }}>Loading…</Text>
+      </View>
+    );
+  }
   if (!user) return <SignIn />;
 
   switch (route.name) {
@@ -60,7 +67,7 @@ function Navigator() {
             {route.job.kind === "recce" ? "Recce submitted" : route.job.kind === "install" ? "Installation complete" : "Repair closed"}
           </Text>
           <Text style={{ textAlign: "center", color: C.muted, fontSize: 15 }}>
-            {route.job.outletName} is saved on your phone and uploads automatically. {route.job.kind === "recce" ? "Design takes it from here." : "The office and the client see the photos as soon as it lands."}
+            {route.job.outletName} is saved on your phone and sends as soon as there is signal. {route.job.kind === "recce" ? "Design takes it from here." : "The office and the client see the photos as soon as it lands."}
           </Text>
           <Button title="Next job" onPress={home} />
         </View>

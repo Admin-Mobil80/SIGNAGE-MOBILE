@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { todayIso, type Job } from "../data";
+import { isToday, timeOf, type Job } from "../data";
 import { useApp } from "../state";
 import { Badge, C, Card, TopBar } from "../ui";
 
@@ -10,17 +10,18 @@ export const KIND: Record<Job["kind"], { label: string; tone: "info" | "accent" 
   repair: { label: "Repair", tone: "bad" },
 };
 
-const sameDay = (a: string, b: string) => a.slice(0, 10) === b.slice(0, 10);
 const dayLabel = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
 
 /** Home: the day's route, then what is coming up. */
 export default function Jobs({ onOpen, onProfile }: { onOpen(job: Job): void; onProfile(): void }) {
-  const { user, jobs, submissions, online } = useApp();
+  const { user, jobs, jobsError, loadingJobs, refreshJobs, outbox, submissionFor } = useApp();
   const [tab, setTab] = useState<"today" | "upcoming">("today");
-  const today = jobs.filter((j) => sameDay(j.date, todayIso()));
-  const upcoming = jobs.filter((j) => !sameDay(j.date, todayIso()));
-  const done = today.filter((j) => submissions.has(j.id)).length;
-  const queued = [...submissions.values()].filter((s) => !s.uploaded).length;
+  // Anything due today or overdue is today's work; repairs always are.
+  const today = jobs.filter((j) => j.kind === "repair" || isToday(j.date));
+  const upcoming = jobs.filter((j) => !today.includes(j));
+  const doneToday = outbox.filter((x) => x.status !== "failed" && isToday(x.createdAt)).length;
+  const queued = outbox.filter((x) => x.status === "waiting" || x.status === "sending").length;
+  const failed = outbox.filter((x) => x.status === "failed").length;
   const list = tab === "today" ? today : upcoming;
 
   return (
@@ -44,17 +45,17 @@ export default function Jobs({ onOpen, onProfile }: { onOpen(job: Job): void; on
         <View style={{ flexDirection: "row", gap: 10 }}>
           <Card style={{ flex: 1 }}>
             <Text style={{ color: C.muted, fontSize: 13 }}>Today</Text>
-            <Text style={{ fontSize: 24, fontWeight: "800", color: C.fg }}>
-              {done}/{today.length}
-            </Text>
-            <Text style={{ color: C.faint, fontSize: 12 }}>visits done</Text>
+            <Text style={{ fontSize: 24, fontWeight: "800", color: C.fg }}>{doneToday}</Text>
+            <Text style={{ color: C.faint, fontSize: 12 }}>visits done · {today.length} to go</Text>
           </Card>
           <Card style={{ flex: 1 }}>
             <Text style={{ color: C.muted, fontSize: 13 }}>Sync</Text>
-            <Text style={{ fontSize: 16, fontWeight: "800", color: !online ? C.warn : queued ? C.info : C.ok, marginTop: 6 }}>
-              {!online ? "Offline" : queued ? "Uploading…" : "All synced"}
+            <Text style={{ fontSize: 16, fontWeight: "800", color: failed ? C.bad : queued ? C.info : C.ok, marginTop: 6 }}>
+              {failed ? "Needs attention" : queued ? "Sending…" : "All synced"}
             </Text>
-            <Text style={{ color: C.faint, fontSize: 12 }}>{queued ? `${queued} visit${queued === 1 ? "" : "s"} waiting` : "nothing waiting"}</Text>
+            <Text style={{ color: C.faint, fontSize: 12 }}>
+              {failed ? `${failed} visit${failed === 1 ? "" : "s"} refused — see profile` : queued ? `${queued} visit${queued === 1 ? "" : "s"} waiting for signal` : "nothing waiting"}
+            </Text>
           </Card>
         </View>
 
@@ -68,9 +69,13 @@ export default function Jobs({ onOpen, onProfile }: { onOpen(job: Job): void; on
           ))}
         </View>
 
-        {list.length === 0 && <Text style={{ color: C.muted, textAlign: "center", marginTop: 30 }}>Nothing booked.</Text>}
+        {jobsError && <Text style={{ color: C.warn }}>{jobsError}</Text>}
+        <Text onPress={() => void refreshJobs()} style={{ color: C.accent, fontWeight: "600", textAlign: "right" }}>
+          {loadingJobs ? "Refreshing…" : "Refresh jobs"}
+        </Text>
+        {list.length === 0 && <Text style={{ color: C.muted, textAlign: "center", marginTop: 30 }}>{loadingJobs ? "Loading your jobs…" : "Nothing booked."}</Text>}
         {list.map((job, i) => {
-          const sub = submissions.get(job.id);
+          const sub = submissionFor(job.id);
           return (
             <Card key={job.id} onPress={() => onOpen(job)} style={sub && { opacity: 0.7 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -82,12 +87,12 @@ export default function Jobs({ onOpen, onProfile }: { onOpen(job: Job): void; on
                 <Badge text={KIND[job.kind].label} tone={KIND[job.kind].tone} />
                 <Badge text={job.client} />
                 <View style={{ flex: 1 }} />
-                <Text style={{ color: C.muted, fontSize: 13 }}>{tab === "today" ? job.window : dayLabel(job.date)}</Text>
+                <Text style={{ color: C.muted, fontSize: 13 }}>{tab === "today" ? timeOf(job) : `${dayLabel(job.date)} · ${timeOf(job)}`}</Text>
               </View>
               <Text style={{ fontSize: 17, fontWeight: "700", color: C.fg }}>{job.outletName}</Text>
               <Text style={{ color: C.muted, marginTop: 2 }}>{job.address}</Text>
               {sub ? (
-                <Text style={{ color: sub.uploaded ? C.ok : C.info, marginTop: 6, fontWeight: "600" }}>{sub.uploaded ? "✓ Submitted and uploaded" : "Submitted · waiting to upload"}</Text>
+                <Text style={{ color: sub.status === "sent" ? C.ok : C.info, marginTop: 6, fontWeight: "600" }}>{sub.status === "sent" ? "✓ Submitted" : "Saved · waiting for signal"}</Text>
               ) : job.issue ? (
                 <Text style={{ color: C.bad, marginTop: 6 }} numberOfLines={2}>
                   {job.issue}

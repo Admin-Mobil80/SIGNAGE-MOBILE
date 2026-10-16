@@ -1,5 +1,5 @@
 import { Linking, Platform, ScrollView, Text, View } from "react-native";
-import type { Job } from "../data";
+import { timeOf, type Job } from "../data";
 import { useApp } from "../state";
 import { Badge, Button, C, Card, Screen, SectionTitle, TopBar } from "../ui";
 import { KIND } from "./Jobs";
@@ -14,21 +14,22 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 export default function JobDetail({ job, onBack, onStart }: { job: Job; onBack(): void; onStart(): void }) {
-  const { submissions } = useApp();
-  const sub = submissions.get(job.id);
-  const mapsUrl = Platform.select({
-    android: `geo:${job.lat},${job.lng}?q=${job.lat},${job.lng}(${encodeURIComponent(job.outletName)})`,
-    default: `https://www.google.com/maps/search/?api=1&query=${job.lat},${job.lng}`,
-  });
+  const { submissionFor } = useApp();
+  const sub = submissionFor(job.id);
+  // Before the recce there are no coordinates: search by address instead.
+  const place = encodeURIComponent(`${job.outletName}, ${job.address}, ${job.city}`);
+  const mapsUrl = job.lat
+    ? Platform.select({ android: `geo:${job.lat},${job.lng}?q=${job.lat},${job.lng}(${encodeURIComponent(job.outletName)})`, default: `https://www.google.com/maps/search/?api=1&query=${job.lat},${job.lng}` })
+    : Platform.select({ android: `geo:0,0?q=${place}`, default: `https://www.google.com/maps/search/?api=1&query=${place}` });
   const start = job.kind === "recce" ? "Start recce" : job.kind === "install" ? "Start installation" : "Start repair";
 
   return (
-    <Screen footer={sub ? <Text style={{ textAlign: "center", color: C.ok, fontWeight: "700" }}>✓ Submitted {sub.uploaded ? "and uploaded" : "· waiting to upload"}</Text> : <Button title={start} onPress={onStart} />}>
+    <Screen footer={sub ? <Text style={{ textAlign: "center", color: C.ok, fontWeight: "700" }}>✓ {sub.status === "sent" ? "Submitted" : "Saved · sends when there is signal"}</Text> : <Button title={start} onPress={onStart} />}>
       <TopBar title={job.outletName} subtitle={`${job.client} · ${job.outletCode}`} onBack={onBack} />
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 30 }}>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <Badge text={KIND[job.kind].label} tone={KIND[job.kind].tone} />
-          <Badge text={job.window} />
+          <Badge text={timeOf(job)} />
         </View>
 
         {job.issue && (
